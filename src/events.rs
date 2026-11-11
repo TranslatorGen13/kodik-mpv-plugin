@@ -5,7 +5,7 @@ use reqwest::Url;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Quality;
-use crate::mpv_ext::MpvExt;
+use crate::mpv_ext::{MpvExt, MpvResultExt};
 use crate::shiki::ShikiMetaData;
 use crate::state::PluginState;
 use crate::{kodik, shiki};
@@ -220,7 +220,53 @@ fn observe_aid_reply(state: &mut PluginState, mp: &Handle) -> Result<()> {
         return Ok(());
     };
 
-    let Ok(current_translation_title) = mp.get_current_tracks_audio_title() else {
+    // Get current aid. If unavailable or invalid, do nothing.
+    let aid = match mp.get_property::<i64>("aid") {
+        Ok(id) if id > 0 => id,
+        _ => return Ok(()),
+    };
+
+    // Resolve title from track-list instead of current-tracks/audio/title.
+    // External placeholder tracks often report title as unavailable via the
+    // latter property, which previously caused a silent early return.
+    let track_list = mp
+        .get_property::<Node>("track-list")
+        .mpv_context("failed to get track-list")?;
+
+    let Node::Array(tracks) = track_list else {
+        anyhow::bail!("track-list is not an array");
+    };
+
+    let mut title: Option<String> = None;
+
+    for track in tracks {
+        let Node::Map(map) = track else { continue };
+
+        let id = map.get("id").and_then(|n| match n {
+            Node::Int(v) => Some(*v),
+            _ => None,
+        });
+
+        let is_audio = map
+            .get("type")
+            .and_then(|n| match n {
+                Node::String(s) => Some(s.as_str() == "audio"),
+                _ => None,
+            })
+            .unwrap_or(false);
+
+        if id == Some(aid) && is_audio {
+            if let Some(Node::String(t)) = map.get("title") {
+                if !t.is_empty() {
+                    title = Some(t.clone());
+                }
+            }
+            break;
+        }
+    }
+
+    let Some(current_translation_title) = title else {
+        // Title still unavailable — exit quietly without breaking playback.
         return Ok(());
     };
 
@@ -228,9 +274,17 @@ fn observe_aid_reply(state: &mut PluginState, mp: &Handle) -> Result<()> {
         .config_mut()
         .set_translation_title(Some(regex::escape(&current_translation_title)));
 
-    let time_pos = mp.get_time_pos()?;
-    mp.set_file_local_options_start(time_pos)?;
-    mp.reload_current_file()?;
+    // Preserve playback position via file-local-options/start, then reload.
+    // Note: playlist-play-index accepts only one argument in current MPV
+    // (the old "current yes" form is invalid and caused arg parse errors).
+    let time_pos = mp.get_time_pos().unwrap_or(0.0);
+    let _ = mp.set_file_local_options_start(time_pos);
+
+    // Small delay to let MPV finish track switching.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    mp.command(["playlist-play-index", "current"])
+        .mpv_context("failed to `playlist-play-index current`")?;
 
     Ok(())
 }

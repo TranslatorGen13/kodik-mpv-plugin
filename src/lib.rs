@@ -1,4 +1,4 @@
-use mpv_client::{Event, Handle, mpv_handle};
+use mpv_client::{Event, EventQueueToken, Handle};
 
 mod cache;
 mod config;
@@ -12,7 +12,7 @@ use crate::cache::Cache;
 use crate::state::PluginState;
 
 #[mpv_client::main]
-fn main(mp: &mut Handle) -> i32 {
+fn main(mp: &Handle, mut event_token: EventQueueToken) -> i32 {
     let mut state = match PluginState::new(mp) {
         Ok(state) => state,
         Err(err) => {
@@ -35,7 +35,7 @@ fn main(mp: &mut Handle) -> i32 {
     }
 
     loop {
-        match mp.wait_event(-1.) {
+        match mp.wait_event(&mut event_token, -1.) {
             Event::Shutdown => break,
             Event::Hook(reply, hook) => {
                 if let Err(err) = events::handle_event(&mut state, mp, reply) {

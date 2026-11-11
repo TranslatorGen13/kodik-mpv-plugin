@@ -45,8 +45,6 @@ pub trait MpvExt {
     fn observe_property_ext<T: Format>(&self, reply: u64, name: impl AsRef<str>) -> Result<()>;
     fn set_file_local_options_start<S: ToString>(&self, time_pos: S) -> Result<()>;
     fn get_time_pos(&self) -> Result<f64>;
-    fn reload_current_file(&self) -> Result<()>;
-    fn get_current_tracks_audio_title(&self) -> Result<String>;
     fn get_playlist_filename_by_index(&self, index: i64) -> Result<String>;
     fn get_playlist_count(&self) -> Result<i64>;
 }
@@ -146,16 +144,6 @@ impl MpvExt for Handle {
     fn get_time_pos(&self) -> Result<f64> {
         self.get_property("time-pos")
             .mpv_context("failed to `get-property time-pos`")
-    }
-
-    fn reload_current_file(&self) -> Result<()> {
-        self.command(["playlist-play-index", "current", "yes"])
-            .mpv_context("failed to `playlist-play-index current yes`")
-    }
-
-    fn get_current_tracks_audio_title(&self) -> Result<String> {
-        self.get_property::<String>("current-tracks/audio/title")
-            .mpv_context("failed to `get-property current-tracks/audio/title`")
     }
 
     fn get_playlist_filename_by_index(&self, index: i64) -> Result<String> {
